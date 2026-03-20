@@ -5,7 +5,6 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy_serializer import SerializerMixin
 from flask_bcrypt import Bcrypt
 
-# Standard naming convention for migrations
 metadata = MetaData(naming_convention={
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -24,13 +23,12 @@ class User(db.Model, SerializerMixin):
     username = db.Column(db.String, unique=True, nullable=False)
     _password_hash = db.Column(db.String, nullable=False)
 
-    # Relationship to JackTrack logs
     logs = db.relationship('DailyLog', backref='user', cascade='all, delete-orphan')
+    ingredients = db.relationship('Ingredient', backref='user', cascade='all, delete-orphan')
+    meals = db.relationship('Meal', backref='user', cascade='all, delete-orphan')
 
-    # Serialization rules: hide the password hash and prevent recursion
-    serialize_rules = ('-logs.user', '-_password_hash',)
+    serialize_rules = ('-logs.user', '-ingredients.user', '-meals.user', '-_password_hash',)
 
-    # --- Bcrypt Password Protection ---
     @hybrid_property
     def password_hash(self):
         raise AttributeError('Password hashes may not be viewed.')
@@ -43,7 +41,6 @@ class User(db.Model, SerializerMixin):
     def authenticate(self, password):
         return bcrypt.check_password_hash(self._password_hash, password.encode('utf-8'))
 
-    # --- Validations ---
     @validates('username')
     def validate_username(self, key, username):
         if not username:
@@ -59,20 +56,73 @@ class DailyLog(db.Model, SerializerMixin):
 
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False)
-    total_calories = db.Column(db.Integer, nullable=False)
+    
+    # Updated to track full macros
+    total_calories = db.Column(db.Integer, nullable=False, default=0)
+    total_protein = db.Column(db.Integer, nullable=False, default=0)
+    total_carbs = db.Column(db.Integer, nullable=False, default=0)
+    total_fat = db.Column(db.Integer, nullable=False, default=0)
+    
     current_weight = db.Column(db.Float, nullable=True) 
 
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
-    # Serialization rules: prevent recursion
-    serialize_rules = ('-user.logs',)
+    serialize_rules = ('-user.logs', '-user.ingredients', '-user.meals',)
 
-    # --- Validations ---
-    @validates('total_calories')
-    def validate_calories(self, key, total_calories):
-        if total_calories < 0:
-            raise ValueError("Calories cannot be negative")
-        return total_calories
+    @validates('total_calories', 'total_protein', 'total_carbs', 'total_fat')
+    def validate_macros(self, key, value):
+        if value < 0:
+            raise ValueError(f"{key} cannot be negative")
+        return value
 
     def __repr__(self):
         return f'<DailyLog {self.date} - {self.total_calories} kcal>'
+
+
+class Ingredient(db.Model, SerializerMixin):
+    __tablename__ = 'ingredients'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    
+    # Macros for the ingredient
+    calories = db.Column(db.Integer, nullable=False)
+    protein = db.Column(db.Integer, nullable=False, default=0)
+    carbs = db.Column(db.Integer, nullable=False, default=0)
+    fat = db.Column(db.Integer, nullable=False, default=0)
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+
+    serialize_rules = ('-user.ingredients', '-user.logs', '-user.meals',)
+
+    def __repr__(self):
+        return f'<Ingredient {self.name} | P:{self.protein} C:{self.carbs} F:{self.fat}>'
+
+
+class Meal(db.Model, SerializerMixin):
+    __tablename__ = 'meals'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+
+    meal_ingredients = db.relationship('MealIngredient', backref='meal', cascade='all, delete-orphan')
+
+    serialize_rules = ('-user.meals', '-user.logs', '-user.ingredients', '-meal_ingredients.meal',)
+
+    def __repr__(self):
+        return f'<Meal {self.name}>'
+
+
+class MealIngredient(db.Model, SerializerMixin):
+    __tablename__ = 'meal_ingredients'
+
+    id = db.Column(db.Integer, primary_key=True)
+    meal_id = db.Column(db.Integer, db.ForeignKey('meals.id'), nullable=False)
+    ingredient_id = db.Column(db.Integer, db.ForeignKey('ingredients.id'), nullable=False)
+    
+    quantity = db.Column(db.Float, nullable=False, default=1.0)
+
+    ingredient = db.relationship('Ingredient')
+
+    serialize_rules = ('-meal.meal_ingredients', '-ingredient',)
