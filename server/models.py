@@ -5,6 +5,7 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy_serializer import SerializerMixin
 from flask_bcrypt import Bcrypt
 
+# Naming conventions to ensure Alembic handles migrations and foreign keys smoothly
 metadata = MetaData(naming_convention={
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -23,22 +24,27 @@ class User(db.Model, SerializerMixin):
     username = db.Column(db.String, unique=True, nullable=False)
     _password_hash = db.Column(db.String, nullable=False)
 
+    # Relationships to tie everything back to the specific user
     logs = db.relationship('DailyLog', backref='user', cascade='all, delete-orphan')
     ingredients = db.relationship('Ingredient', backref='user', cascade='all, delete-orphan')
     meals = db.relationship('Meal', backref='user', cascade='all, delete-orphan')
 
+    # Prevent recursive serialization and hide the password hash from API responses
     serialize_rules = ('-logs.user', '-ingredients.user', '-meals.user', '-_password_hash',)
 
     @hybrid_property
     def password_hash(self):
+        # Block read access to the raw password hash
         raise AttributeError('Password hashes may not be viewed.')
 
     @password_hash.setter
     def password_hash(self, password):
+        # Automatically hash the password using bcrypt when a new password is set
         password_hash = bcrypt.generate_password_hash(password.encode('utf-8'))
         self._password_hash = password_hash.decode('utf-8')
 
     def authenticate(self, password):
+        # Verify if the provided password matches the stored hash
         return bcrypt.check_password_hash(self._password_hash, password.encode('utf-8'))
 
     @validates('username')
@@ -57,7 +63,7 @@ class DailyLog(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.Date, nullable=False)
     
-    # Updated to track full macros
+    # Tracking full macros for daily nutritional goals
     total_calories = db.Column(db.Integer, nullable=False, default=0)
     total_protein = db.Column(db.Integer, nullable=False, default=0)
     total_carbs = db.Column(db.Integer, nullable=False, default=0)
@@ -71,6 +77,7 @@ class DailyLog(db.Model, SerializerMixin):
 
     @validates('total_calories', 'total_protein', 'total_carbs', 'total_fat')
     def validate_macros(self, key, value):
+        # Quick check to ensure we aren't logging negative macros
         if value < 0:
             raise ValueError(f"{key} cannot be negative")
         return value
@@ -85,7 +92,7 @@ class Ingredient(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String, nullable=False)
     
-    # Macros for the ingredient
+    # Base macros for a single ingredient
     calories = db.Column(db.Integer, nullable=False)
     protein = db.Column(db.Integer, nullable=False, default=0)
     carbs = db.Column(db.Integer, nullable=False, default=0)
@@ -106,6 +113,7 @@ class Meal(db.Model, SerializerMixin):
     name = db.Column(db.String, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
+    # Link to the join table to associate multiple ingredients with a single meal
     meal_ingredients = db.relationship('MealIngredient', backref='meal', cascade='all, delete-orphan')
 
     serialize_rules = ('-user.meals', '-user.logs', '-user.ingredients', '-meal_ingredients.meal',)
@@ -117,10 +125,12 @@ class Meal(db.Model, SerializerMixin):
 class MealIngredient(db.Model, SerializerMixin):
     __tablename__ = 'meal_ingredients'
 
+    # Join table between Meals and Ingredients to handle many-to-many relationships
     id = db.Column(db.Integer, primary_key=True)
     meal_id = db.Column(db.Integer, db.ForeignKey('meals.id'), nullable=False)
     ingredient_id = db.Column(db.Integer, db.ForeignKey('ingredients.id'), nullable=False)
     
+    # Allows users to adjust portion sizes (e.g., 1.5 servings of rice)
     quantity = db.Column(db.Float, nullable=False, default=1.0)
 
     ingredient = db.relationship('Ingredient')
