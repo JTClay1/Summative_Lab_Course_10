@@ -177,17 +177,97 @@ class DailyLogByID(Resource):
         db.session.delete(log)
         db.session.commit()
         return {}, 204
+    
+# ==========================================
+# INGREDIENT CRUD ROUTES
+# ==========================================
+
+class IngredientsResource(Resource):
+    @jwt_required()
+    def get(self):
+        current_user_id = get_jwt_identity()
+        
+        # Pagination setup (default: page 1, 10 items per page)
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        
+        # Query ONLY this user's ingredients, and paginate them
+        ingredients_paginated = Ingredient.query.filter_by(user_id=current_user_id).paginate(page=page, per_page=per_page)
+        
+        ingredients_list = [ingredient.to_dict() for ingredient in ingredients_paginated.items]
+        
+        return {
+            'ingredients': ingredients_list,
+            'total_pages': ingredients_paginated.pages,
+            'current_page': ingredients_paginated.page
+        }, 200
+
+    @jwt_required()
+    def post(self):
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        try:
+            new_ingredient = Ingredient(
+                name=data.get('name'),
+                calories=data.get('calories'),
+                protein=data.get('protein', 0),
+                carbs=data.get('carbs', 0),
+                fat=data.get('fat', 0),
+                user_id=current_user_id  # Lock to the logged-in user
+            )
+            db.session.add(new_ingredient)
+            db.session.commit()
+            return new_ingredient.to_dict(), 201
+            
+        except Exception as e:
+            return {'error': str(e)}, 400
+
+class IngredientByID(Resource):
+    @jwt_required()
+    def patch(self, id):
+        current_user_id = get_jwt_identity()
+        
+        # Ensure the ingredient exists AND belongs to the current user
+        ingredient = Ingredient.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not ingredient:
+            return {'error': 'Ingredient not found or unauthorized'}, 404
+            
+        data = request.get_json()
+        try:
+            for attr in data:
+                setattr(ingredient, attr, data[attr])
+            db.session.commit()
+            return ingredient.to_dict(), 200
+        except ValueError as e:
+            return {'error': str(e)}, 400
+
+    @jwt_required()
+    def delete(self, id):
+        current_user_id = get_jwt_identity()
+        
+        ingredient = Ingredient.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not ingredient:
+            return {'error': 'Ingredient not found or unauthorized'}, 404
+            
+        db.session.delete(ingredient)
+        db.session.commit()
+        return {}, 204
 
 # Register the new CRUD routes
 api.add_resource(DailyLogsResource, '/logs')
 api.add_resource(DailyLogByID, '/logs/<int:id>')
-
 # Register the routes with Flask-RESTful
 api.add_resource(Signup, '/signup')
 api.add_resource(Login, '/login')
 api.add_resource(CheckSession, '/check_session')
 # 4. REGISTER THE LOGOUT ROUTE HERE
 api.add_resource(Logout, '/logout')
+# Register the Ingredient routes
+api.add_resource(IngredientsResource, '/ingredients')
+api.add_resource(IngredientByID, '/ingredients/<int:id>')
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
