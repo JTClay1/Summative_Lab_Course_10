@@ -17,6 +17,7 @@ metadata = MetaData(naming_convention={
 db = SQLAlchemy(metadata=metadata)
 bcrypt = Bcrypt()
 
+
 class User(db.Model, SerializerMixin):
     __tablename__ = 'users'
 
@@ -69,7 +70,7 @@ class DailyLog(db.Model, SerializerMixin):
     total_carbs = db.Column(db.Integer, nullable=False, default=0)
     total_fat = db.Column(db.Integer, nullable=False, default=0)
     
-    current_weight = db.Column(db.Float, nullable=True) 
+    current_weight = db.Column(db.Float, nullable=True)
 
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
@@ -116,10 +117,38 @@ class Meal(db.Model, SerializerMixin):
     # Link to the join table to associate multiple ingredients with a single meal
     meal_ingredients = db.relationship('MealIngredient', backref='meal', cascade='all, delete-orphan')
 
+    # We add our custom properties to the serialize_rules so they are included in the JSON response
     serialize_rules = ('-user.meals', '-user.logs', '-user.ingredients', '-meal_ingredients.meal',)
 
+    # Dynamic Macro Calculations! 
+    # These calculate on the fly by multiplying the ingredient's base macro by the quantity in the meal
+    @property
+    def total_calories(self):
+        return sum((mi.ingredient.calories if mi.ingredient else 0) * mi.quantity for mi in self.meal_ingredients)
+
+    @property
+    def total_protein(self):
+        return sum((mi.ingredient.protein if mi.ingredient else 0) * mi.quantity for mi in self.meal_ingredients)
+
+    @property
+    def total_carbs(self):
+        return sum((mi.ingredient.carbs if mi.ingredient else 0) * mi.quantity for mi in self.meal_ingredients)
+
+    @property
+    def total_fat(self):
+        return sum((mi.ingredient.fat if mi.ingredient else 0) * mi.quantity for mi in self.meal_ingredients)
+
+    def to_dict(self, *args, **kwargs):
+        # We override to_dict slightly to guarantee our dynamic properties are included in the API response
+        meal_dict = super().to_dict(*args, **kwargs)
+        meal_dict['total_calories'] = self.total_calories
+        meal_dict['total_protein'] = self.total_protein
+        meal_dict['total_carbs'] = self.total_carbs
+        meal_dict['total_fat'] = self.total_fat
+        return meal_dict
+
     def __repr__(self):
-        return f'<Meal {self.name}>'
+        return f'<Meal {self.name} | {self.total_calories} kcal>'
 
 
 class MealIngredient(db.Model, SerializerMixin):
