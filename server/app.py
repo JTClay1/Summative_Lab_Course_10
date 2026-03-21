@@ -53,7 +53,7 @@ class Signup(Resource):
             db.session.commit()
 
             # Generate JWT token
-            access_token = create_access_token(identity=new_user.id)
+            access_token = create_access_token(identity=str(new_user.id))
             return {'user': new_user.to_dict(), 'access_token': access_token}, 201
 
         except ValueError as e:
@@ -70,7 +70,7 @@ class Login(Resource):
 
         # Check if user exists and password is correct
         if user and user.authenticate(password):
-            access_token = create_access_token(identity=user.id)
+            access_token = create_access_token(identity=str(user.id))
             return {'user': user.to_dict(), 'access_token': access_token}, 200
 
         return {'error': 'Invalid username or password'}, 401

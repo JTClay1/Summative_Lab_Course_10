@@ -1,15 +1,12 @@
 from datetime import date
-
 from models import db, DailyLog, Ingredient
 
 def test_logs_requires_auth(client):
     response = client.get("/logs")
     assert response.status_code == 401
 
-def test_logs_index_returns_user_logs(client, auth_header, user, test_app):
-    # Wrap database operations in the app context!
+def test_logs_index_returns_user_logs(client, auth_header, user_id, test_app):
     with test_app.app_context():
-        # Create a log directly in the DB for the user
         log = DailyLog(
             date=date(2026, 3, 21),
             total_calories=400,
@@ -17,13 +14,14 @@ def test_logs_index_returns_user_logs(client, auth_header, user, test_app):
             total_carbs=50,
             total_fat=10,
             current_weight=180.0,
-            user_id=user.id,
+            user_id=user_id,
         )
         db.session.add(log)
         db.session.commit()
 
     response = client.get("/logs", headers=auth_header)
-    assert response.status_code == 200
+    # The added response.get_json() will print the exact error!
+    assert response.status_code == 200, response.get_json()
     data = response.get_json()
 
     assert "logs" in data
@@ -40,7 +38,7 @@ def test_create_log(client, auth_header):
         "current_weight": 179.5,
     }
     response = client.post("/logs", json=payload, headers=auth_header)
-    assert response.status_code == 201
+    assert response.status_code == 201, response.get_json()
     data = response.get_json()
     assert data["total_calories"] == 500
 
@@ -48,8 +46,7 @@ def test_ingredients_requires_auth(client):
     response = client.get("/ingredients")
     assert response.status_code == 401
 
-def test_ingredients_index_returns_user_ingredients(client, auth_header, user, test_app):
-    # Wrap database operations in the app context!
+def test_ingredients_index_returns_user_ingredients(client, auth_header, user_id, test_app):
     with test_app.app_context():
         ingredient = Ingredient(
             name="Oats",
@@ -57,13 +54,13 @@ def test_ingredients_index_returns_user_ingredients(client, auth_header, user, t
             protein=5,
             carbs=27,
             fat=3,
-            user_id=user.id,
+            user_id=user_id,
         )
         db.session.add(ingredient)
         db.session.commit()
 
     response = client.get("/ingredients", headers=auth_header)
-    assert response.status_code == 200
+    assert response.status_code == 200, response.get_json()
     data = response.get_json()
 
     assert "ingredients" in data
@@ -79,6 +76,6 @@ def test_create_ingredient(client, auth_header):
         "fat": 0,
     }
     response = client.post("/ingredients", json=payload, headers=auth_header)
-    assert response.status_code == 201
+    assert response.status_code == 201, response.get_json()
     data = response.get_json()
     assert data["name"] == "Banana"
