@@ -256,6 +256,87 @@ class IngredientByID(Resource):
         db.session.commit()
         return {}, 204
 
+# ==========================================
+# MEAL CRUD ROUTES
+# ==========================================
+
+class MealsResource(Resource):
+    @jwt_required()
+    def get(self):
+        current_user_id = get_jwt_identity()
+        
+        # Pagination setup (default: page 1, 10 items per page)
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        
+        # Query ONLY this user's meals, and paginate them
+        meals_paginated = Meal.query.filter_by(user_id=current_user_id).paginate(page=page, per_page=per_page)
+        
+        meals_list = [meal.to_dict() for meal in meals_paginated.items]
+        
+        return {
+            'meals': meals_list,
+            'total_pages': meals_paginated.pages,
+            'current_page': meals_paginated.page
+        }, 200
+
+    @jwt_required()
+    def post(self):
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        try:
+            new_meal = Meal(
+                name=data.get('name'),
+                user_id=current_user_id  # Lock to the logged-in user
+            )
+            db.session.add(new_meal)
+            db.session.commit()
+            return new_meal.to_dict(), 201
+            
+        except Exception as e:
+            return {'error': str(e)}, 400
+
+class MealByID(Resource):
+    @jwt_required()
+    def get(self, id):
+        current_user_id = get_jwt_identity()
+        meal = Meal.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not meal:
+            return {'error': 'Meal not found or unauthorized'}, 404
+            
+        return meal.to_dict(), 200
+
+    @jwt_required()
+    def patch(self, id):
+        current_user_id = get_jwt_identity()
+        meal = Meal.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not meal:
+            return {'error': 'Meal not found or unauthorized'}, 404
+            
+        data = request.get_json()
+        try:
+            if 'name' in data:
+                meal.name = data['name']
+            db.session.commit()
+            return meal.to_dict(), 200
+        except ValueError as e:
+            return {'error': str(e)}, 400
+
+    @jwt_required()
+    def delete(self, id):
+        current_user_id = get_jwt_identity()
+        meal = Meal.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not meal:
+            return {'error': 'Meal not found or unauthorized'}, 404
+            
+        db.session.delete(meal)
+        db.session.commit()
+        return {}, 204
+
 # Register the new CRUD routes
 api.add_resource(DailyLogsResource, '/logs')
 api.add_resource(DailyLogByID, '/logs/<int:id>')
@@ -268,6 +349,9 @@ api.add_resource(Logout, '/logout')
 # Register the Ingredient routes
 api.add_resource(IngredientsResource, '/ingredients')
 api.add_resource(IngredientByID, '/ingredients/<int:id>')
+# Register the Meal routes
+api.add_resource(MealsResource, '/meals')
+api.add_resource(MealByID, '/meals/<int:id>')
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
