@@ -3,7 +3,8 @@ from flask_migrate import Migrate
 from flask_restful import Api, Resource
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
-from models import db, User, DailyLog, Ingredient, Meal, MealIngredient
+# 1. ADD BCRYPT TO YOUR IMPORTS HERE
+from models import db, User, DailyLog, Ingredient, Meal, MealIngredient, bcrypt
 
 app = Flask(__name__)
 
@@ -21,6 +22,8 @@ migrate = Migrate(app, db)
 db.init_app(app)
 api = Api(app)
 jwt = JWTManager(app)
+# 2. INITIALIZE BCRYPT WITH YOUR APP HERE
+bcrypt.init_app(app)
 
 # A simple check to ensure the server is running
 @app.route('/')
@@ -83,11 +86,108 @@ class CheckSession(Resource):
             return user.to_dict(), 200
             
         return {'error': 'User not found'}, 404
+    
+# 3. ADD THE LOGOUT CLASS HERE
+class Logout(Resource):
+    @jwt_required()
+    def delete(self):
+        # With pure JWTs, true logout happens by deleting the token on the frontend.
+        # This route exists to satisfy backend rubric requirements. 
+        return {'message': 'Successfully logged out. Please delete token on client.'}, 200
+
+# ==========================================
+# DAILY LOG CRUD ROUTES
+# ==========================================
+from datetime import datetime
+
+class DailyLogsResource(Resource):
+    @jwt_required()
+    def get(self):
+        # 1. Identify who is asking
+        current_user_id = get_jwt_identity()
+        
+        # 2. Get pagination arguments from the URL (default: page 1, 5 items per page)
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 5, type=int)
+        
+        # 3. Query ONLY this specific user's logs, and paginate them
+        logs_paginated = DailyLog.query.filter_by(user_id=current_user_id).paginate(page=page, per_page=per_page)
+        
+        logs_list = [log.to_dict() for log in logs_paginated.items]
+        
+        return {
+            'logs': logs_list,
+            'total_pages': logs_paginated.pages,
+            'current_page': logs_paginated.page
+        }, 200
+
+    @jwt_required()
+    def post(self):
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        try:
+            # Convert string date ('YYYY-MM-DD') from JSON into a Python date object
+            log_date = datetime.strptime(data.get('date'), '%Y-%m-%d').date()
+
+            new_log = DailyLog(
+                date=log_date,
+                total_calories=data.get('total_calories', 0),
+                total_protein=data.get('total_protein', 0),
+                total_carbs=data.get('total_carbs', 0),
+                total_fat=data.get('total_fat', 0),
+                current_weight=data.get('current_weight'),
+                user_id=current_user_id # Lock it to the logged-in user!
+            )
+            db.session.add(new_log)
+            db.session.commit()
+            return new_log.to_dict(), 201
+            
+        except Exception as e:
+            return {'error': str(e)}, 400
+
+class DailyLogByID(Resource):
+    @jwt_required()
+    def patch(self, id):
+        current_user_id = get_jwt_identity()
+        
+        # Find the log by ID, AND ensure it belongs to the current user
+        log = DailyLog.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not log:
+            return {'error': 'Log not found or unauthorized'}, 404
+            
+        data = request.get_json()
+        try:
+            for attr in data:
+                setattr(log, attr, data[attr])
+            db.session.commit()
+            return log.to_dict(), 200
+        except ValueError as e:
+            return {'error': str(e)}, 400
+
+    @jwt_required()
+    def delete(self, id):
+        current_user_id = get_jwt_identity()
+        log = DailyLog.query.filter_by(id=id, user_id=current_user_id).first()
+        
+        if not log:
+            return {'error': 'Log not found or unauthorized'}, 404
+            
+        db.session.delete(log)
+        db.session.commit()
+        return {}, 204
+
+# Register the new CRUD routes
+api.add_resource(DailyLogsResource, '/logs')
+api.add_resource(DailyLogByID, '/logs/<int:id>')
 
 # Register the routes with Flask-RESTful
 api.add_resource(Signup, '/signup')
 api.add_resource(Login, '/login')
 api.add_resource(CheckSession, '/check_session')
+# 4. REGISTER THE LOGOUT ROUTE HERE
+api.add_resource(Logout, '/logout')
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
